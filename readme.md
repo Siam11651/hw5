@@ -92,7 +92,7 @@ int main(int argc, char* argv[]){
     }
 
     // Cleanup (this code won't actually execute unless you break out of the loop)
-    close(server_fd);
+    close(server_socket);
     terminate(EXIT_SUCCESS);
 }
 
