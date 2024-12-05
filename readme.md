@@ -106,3 +106,45 @@ static void terminate(int status) {
     exit(status);
 }
 ```
+
+## Task II
+
+- **Initialize TU:** Use ```tu_init``` function to initialise new TU
+- **Register to PBX:** Call ```pbx_init``` function to register pbx, we keep the scheme by demon program for now which is to use file descriptor as extension, we think about it later
+- **TU Listener:** For now keep an empty for loop ```for(;;) {}``` block. In the for loop we keep reading the bytes one by one and store them in a buffer. We need to allocate a fixed sized buffer first, we may keep it 20 bytes.
+- **Parse Command:** We keep a variable, maybe name it ```parse_state```, set it to 0, when we encounter a '\r' byte, we set it to 1, when it is 1, if we encounter a '\n' we then consider a command to be finished, we parse it then reset ```parse_state``` to 0.
+- **Parse Command Words:** We first ```strncmp``` our command with "pickup", if matched we send response by writing "DIAL TONE" using ```write``` system call. But we need state management to handle all responses properly.
+- **State Management:** We determine the state of TU using an int ```state```.
+  - 0: On Hook
+  - 1: Ringing
+  - 2: Dial Tone
+  - 3: Ring Back
+  - 4: Busy Signal
+  - 5: Connected
+  - 6: Error
+
+  First inside the infinite for loop, we check which state we are in using switch/case statement
+  ```cpp
+  switch(state) {
+    case 0:
+      // do on hook stuffs
+      break;
+    case 1:
+      // do ringing stuffs
+      break;
+    case 2:
+      // do dial tone stuffs
+      break;
+    case 3:
+      // do ring back stuffs
+      break;
+    case 4:
+      // do busy signal stuffs
+      break;
+    case 5:
+      // do connected stuffs
+      break;
+    default:
+      // do error stuff
+  }
+  ```
