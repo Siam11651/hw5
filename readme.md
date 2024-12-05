@@ -75,14 +75,25 @@ int main(int argc, char* argv[]){
         close(server_socket);
     }
 
-    while(1){
-        int client_socket = accept(server_socket, NULL, NULL);
+    while (1) {
+        int client_fd = accept(server_fd, NULL, NULL);
+        if (client_fd < 0) {
+            perror("accept");
+            continue; // Non-critical error, continue accepting new clients
+        }
+
+        pthread_t thread;
+        if (pthread_create(&thread, NULL, (void* (*)(void*))pbx_client_service, (void*)(intptr_t)client_fd) != 0) {
+            perror("pthread_create");
+            close(client_fd);
+        } else {
+            pthread_detach(thread); // Detach thread to avoid memory leaks
+        }
     }
 
-    fprintf(stderr, "You have to finish implementing main() "
-	    "before the PBX server will function.\n");
-
-    terminate(EXIT_FAILURE);
+    // Cleanup (this code won't actually execute unless you break out of the loop)
+    close(server_fd);
+    terminate(EXIT_SUCCESS);
 }
 
 /*
