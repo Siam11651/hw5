@@ -18,6 +18,8 @@
 #include "sys/socket.h"
 #include "sys/types.h"
 #include "netinet/in.h"
+#include "pthread.h"
+#include "stdint.h"
 
 static void terminate(int status);
 
@@ -54,7 +56,7 @@ int main(int argc, char* argv[]){
 
     // Perform required initialization of the PBX module.
     debug("Initializing PBX...");
-    pbx = pbx_init();
+    // pbx = pbx_init();
 
     // TODO: Set up the server socket and enter a loop to accept connections
     // on this socket.  For each connection, a thread should be started to
@@ -63,6 +65,10 @@ int main(int argc, char* argv[]){
     // shutdown of the server.
 
     int server_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if(server_socket < 0){
+        fprintf(stderr, "Error creating a socket");
+        close(server_socket);
+    }
     struct sockaddr_in server_address = {.sin_family = AF_INET, .sin_port = htons(port), .sin_addr.s_addr = INADDR_ANY};
 
     if(bind(server_socket, (struct sockaddr*) &server_address, sizeof(server_address)) != 0){
@@ -76,24 +82,39 @@ int main(int argc, char* argv[]){
     }
 
     while (1) {
+        debug("Listening on port: %d", port);
         int client_fd = accept(server_socket, NULL, NULL);
         if (client_fd < 0) {
             perror("accept");
-            continue; // Non-critical error, continue accepting new clients
+            continue;
         }
 
+        int *client_fd_ptr = malloc(sizeof(int));
+        if (client_fd_ptr == NULL) {
+            perror("malloc failed");
+            close(client_fd);
+            continue;
+        }
+        *client_fd_ptr = client_fd;
+
         pthread_t thread;
-        if (pthread_create(&thread, NULL, (void* (*)(void*))pbx_client_service, (void*)(intptr_t)client_fd) != 0) {
+        if (pthread_create(&thread, NULL, (void* (*)(void*))pbx_client_service, client_fd_ptr) != 0) {
             perror("pthread_create");
+            free(client_fd_ptr);
             close(client_fd);
         } else {
-            pthread_detach(thread); // Detach thread to avoid memory leaks
+            pthread_detach(thread);
         }
     }
 
-    // Cleanup (this code won't actually execute unless you break out of the loop)
     close(server_socket);
     terminate(EXIT_SUCCESS);
+
+    // fprintf(stderr, "You have to finish implementing main() "
+	//     "before the PBX server will function.\n");
+
+    // terminate(EXIT_FAILURE);
+    //terminate(EXIT_SUCCESS);
 }
 
 /*
@@ -148,3 +169,110 @@ static void terminate(int status) {
       // do error stuff
   }
   ```
+  **Server.c**
+```c
+/*
+ * "PBX" server module.
+ * Manages interaction with a client telephone unit (TU).
+ */
+#include <stdlib.h>
+#include "debug.h"
+#include "pbx.h"
+#include "server.h"
+#include "tu.h"
+#include "string.h"
+
+
+TU* pbx_get_target(PBX* pbx, int num){
+    return tu_init(123); // TODO RETURNS RANDOM
+}
+
+void parse_command(char* buffer, TU* newTU, int client){
+    if (strncmp(buffer, "pickup", 6) == 0) {
+        tu_pickup(newTU);
+    } else if (strncmp(buffer, "hangup", 6) == 0) {
+        tu_hangup(newTU);
+    } else if (strncmp(buffer, "dial", 4) == 0) {
+        int number = atoi(buffer + 5);
+        TU* target = pbx_get_target(pbx, number);
+        if (target) {
+            tu_dial(newTU, target);
+            tu_unref(target, "dial command complete");
+        } else {
+            tu_dial(newTU, NULL);
+        }
+    } else if (strncmp(buffer, "chat", 4) == 0) {
+        tu_chat(newTU, (buffer + 5));
+    } else {
+        write(client, "Invalid Command\r\n", 17);
+    }
+}
+
+void mock_parse_command(char* buffer, int client) {
+    if (strncmp(buffer, "pickup", 6) == 0) {
+        debug("Mock: pickup command executed");
+    } else if (strncmp(buffer, "hangup", 6) == 0) {
+        debug("Mock: hangup command executed");
+    } else if (strncmp(buffer, "dial", 4) == 0) {
+        debug("Mock: dial command executed with number: %s", buffer + 5);
+    } else if (strncmp(buffer, "chat", 4) == 0) {
+        debug("Mock: chat command executed with message: %s", buffer + 5);
+    } else {
+        write(client, "Invalid Command\r\n", 17);
+    }
+}
+
+
+/*
+ * Thread function for the thread that handles interaction with a client TU.
+ * This is called after a network connection has been made via the main server
+ * thread and a new thread has been created to handle the connection.
+ */
+
+void *pbx_client_service(void *arg) {
+    int client = *(int*)arg; // Extract file descriptor
+    free(arg);
+    debug("Connected to: %d", client);
+
+    TU* newTU = tu_init(client); // Initialize the TU
+    if (!newTU) {
+        close(client);
+        return NULL;
+    }
+
+    if (pbx_register(pbx, newTU, client) < 0) {
+        tu_unref(newTU, "Failed to register TU");
+        close(client);
+        return NULL;
+    }
+
+    char buffer[20];
+    int parse_state = 0;
+    size_t buffer_pos = 0;
+
+    for (;;) {
+        char c;
+        int byte_read = read(client, &c, 1);
+        if (byte_read <= 0) {
+            pbx_unregister(pbx, newTU);
+            tu_unref(newTU, "Client disconnected");
+            close(client);
+            return NULL;
+        }
+
+        if (buffer_pos < sizeof(buffer) - 1) {
+            buffer[buffer_pos++] = c;
+        }
+
+        if (c == '\r') {
+            parse_state = 1;
+        } else if (parse_state == 1 && c == '\n') {
+            buffer[buffer_pos] = '\0';
+            // parse_command(buffer, newTU, client);
+            mock_parse_command(buffer, client);
+            parse_state = 0;
+            buffer_pos = 0;
+        }
+    }
+}
+```
