@@ -276,3 +276,17 @@ void *pbx_client_service(void *arg) {
     }
 }
 ```
+
+## Task III
+
+- **PBX Init:** We implement struct PBX as a linked list of pointer to struct TU.
+```cpp
+typedef struct pbx PBX {
+  TU *tu;
+  PBX *next;
+};
+```
+- **PBX Register:** We append a new element to the linked list. We lock a mutex at the beginning of each register task and unlock it before returning the function.
+- **PBX Unregister:** We iterate through the whole linked list to find the element whose TU pointer matches to that of parameter, detach it from linked list, connect the next item to previous item (basically remove an item from linked list) and free the pointer. We lock the same mutex at the beginning of each unregister task and unlock it before returning the function.
+- **PBX Shutdown:** Iterate through all TU items in linked list and free all of them. We use the same mutex in the same manner here as well. To unregister TU, we basically call ```tu_unref``` on that TU pointer. On each TU pointer in the PBX linked list we iterating over.
+- **PBX Dial:** Find the pointer to TU iterating over the linked list which matches the extension and send dial command through the file descriptor in TU. We lock the mutex here as well, because someone might dial to a TU and that TU may request to be unregistered concurrently.
