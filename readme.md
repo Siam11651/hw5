@@ -290,3 +290,234 @@ typedef struct pbx PBX {
 - **PBX Unregister:** We iterate through the whole linked list to find the element whose TU pointer matches to that of parameter, detach it from linked list, connect the next item to previous item (basically remove an item from linked list) and free the pointer. We lock the same mutex at the beginning of each unregister task and unlock it before returning the function.
 - **PBX Shutdown:** Iterate through all TU items in linked list and free all of them. We use the same mutex in the same manner here as well. To unregister TU, we basically call ```tu_unref``` on that TU pointer. On each TU pointer in the PBX linked list we iterating over.
 - **PBX Dial:** Find the pointer to TU iterating over the linked list which matches the extension and send dial command through the file descriptor in TU. We lock the mutex here as well, because someone might dial to a TU and that TU may request to be unregistered concurrently.
+### pbx.c
+```c
+/*
+ * PBX: simulates a Private Branch Exchange.
+ */
+#include <stdlib.h>
+
+#include "pbx.h"
+#include "debug.h"
+#include "pthread.h"
+#include "unistd.h"
+#include "tu.h"
+#include "string.h"
+#include "sys/socket.h"
+
+typedef struct pbx_node{
+    TU *tu;
+    int ext;
+    struct pbx_node *next;
+} PBX_NODE;
+
+struct pbx{
+    PBX_NODE *head;
+    pthread_mutex_t mutex;
+};
+
+void printPBX(PBX *pbx) {
+    pthread_mutex_lock(&pbx->mutex);
+
+    printf("PBX State:\n");
+    PBX_NODE *current = pbx->head;
+    if (!current) {
+        printf("  No TUs registered.\n");
+    } else {
+        while (current) {
+            int ext = current->ext;
+            TU_STATE state = tu_get_state(current->tu);
+            printf("  Extension %d: State = %s\n", ext, tu_state_names[state]);
+            current = current->next;
+        }
+    }
+
+    pthread_mutex_unlock(&pbx->mutex);
+}
+
+TU* pbx_get_target(PBX* pbx, int targetExt) {
+    pthread_mutex_lock(&pbx->mutex);
+
+    PBX_NODE* current = pbx->head;
+    while (current != NULL) {
+        if (current->ext == targetExt) {
+            tu_ref(current->tu, "retrieving target TU");
+            pthread_mutex_unlock(&pbx->mutex);
+            return current->tu;
+        }
+        current = current->next;
+    }
+
+    pthread_mutex_unlock(&pbx->mutex);
+    return NULL;
+}
+
+/*
+ * Initialize a new PBX.
+ *
+ * @return the newly initialized PBX, or NULL if initialization fails.
+ */
+PBX *pbx_init() {
+    // TO BE IMPLEMENTED
+    PBX *pbx = malloc(sizeof(PBX));
+    if(pbx == NULL){
+        return NULL;
+    }
+    pbx->head = NULL;
+    pthread_mutex_init(&pbx->mutex, NULL);
+    return pbx;
+}
+
+/*
+ * Shut down a pbx, shutting down all network connections, waiting for all server
+ * threads to terminate, and freeing all associated resources.
+ * If there are any registered extensions, the associated network connections are
+ * shut down, which will cause the server threads to terminate.
+ * Once all the server threads have terminated, any remaining resources associated
+ * with the PBX are freed.  The PBX object itself is freed, and should not be used again.
+ *
+ * @param pbx  The PBX to be shut down.
+ */
+void pbx_shutdown(PBX *pbx) {
+    // TO BE IMPLEMENTED
+    pthread_mutex_lock(&pbx->mutex);
+
+    PBX_NODE* current = pbx->head;
+    while(current != NULL){
+        shutdown(tu_fileno(current->tu), SHUT_RDWR);
+        tu_unref(current->tu, "shutting everything");
+        PBX_NODE *tmp = current;
+        current = current->next;
+        free(tmp);
+    }
+
+    pthread_mutex_unlock(&pbx->mutex);
+    pthread_mutex_destroy(&pbx->mutex);
+    free(pbx);
+}
+
+/*
+ * Register a telephone unit with a PBX at a specified extension number.
+ * This amounts to "plugging a telephone unit into the PBX".
+ * The TU is initialized to the TU_ON_HOOK state.
+ * The reference count of the TU is increased and the PBX retains this reference
+ *for as long as the TU remains registered.
+ * A notification of the assigned extension number is sent to the underlying network
+ * client.
+ *
+ * @param pbx  The PBX registry.
+ * @param tu  The TU to be registered.
+ * @param ext  The extension number on which the TU is to be registered.
+ * @return 0 if registration succeeds, otherwise -1.
+ */
+int pbx_register(PBX *pbx, TU *tu, int ext) {
+    pthread_mutex_lock(&pbx->mutex);
+
+    PBX_NODE *current = pbx->head;
+    while (current != NULL) {
+        if (current->ext == ext) {
+            pthread_mutex_unlock(&pbx->mutex);
+            fprintf(stderr, "Client already exists. Cannot register!\n");
+            return -1;
+        }
+        current = current->next;
+    }
+
+    PBX_NODE *newNode = malloc(sizeof(PBX_NODE));
+    if (newNode == NULL) {
+        pthread_mutex_unlock(&pbx->mutex);
+        return -1;
+    }
+
+    newNode->tu = tu;
+    newNode->ext = ext;
+    newNode->next = pbx->head;
+    pbx->head = newNode;
+
+    tu_ref(tu, "registration");
+    tu_set_extension(tu, ext);
+
+    pthread_mutex_unlock(&pbx->mutex);
+    return 0;
+}
+
+/*
+ * Unregister a TU from a PBX.
+ * This amounts to "unplugging a telephone unit from the PBX".
+ * The TU is disassociated from its extension number.
+ * Then a hangup operation is performed on the TU to cancel any
+ * call that might be in progress.
+ * Finally, the reference held by the PBX to the TU is released.
+ *
+ * @param pbx  The PBX.
+ * @param tu  The TU to be unregistered.
+ * @return 0 if unregistration succeeds, otherwise -1.
+ */
+int pbx_unregister(PBX *pbx, TU *tu) {
+    // TO BE IMPLEMENTED
+    pthread_mutex_lock(&pbx->mutex);
+
+    PBX_NODE *current = pbx->head;
+    PBX_NODE *prev = NULL;
+
+    while(current != NULL){
+        if(current->tu == tu){
+            tu_hangup(tu);
+
+            if(prev){
+                prev->next = current->next;
+            }
+            else{
+                pbx->head = current->next;
+            }
+
+            tu_unref(tu, "unregistration");
+            free(current);
+            pthread_mutex_unlock(&pbx-> mutex);
+            return 0;
+        }
+
+        prev = current;
+        current = current->next;
+    }
+
+    pthread_mutex_unlock(&pbx->mutex);
+    fprintf(stderr, "TU not found in PBX");
+    return -1;
+}
+
+/*
+ * Use the PBX to initiate a call from a specified TU to a specified extension.
+ *
+ * @param pbx  The PBX registry.
+ * @param tu  The TU that is initiating the call.
+ * @param ext  The extension number to be called.
+ * @return 0 if dialing succeeds, otherwise -1.
+ */
+
+int pbx_dial(PBX *pbx, TU *tu, int ext) {
+    // TO BE IMPLEMENTED
+    pthread_mutex_lock(&pbx->mutex);
+
+    PBX_NODE* current = pbx->head;
+    TU* target = NULL;
+
+    while(current != NULL){
+        if(current->ext == ext){
+            target = current->tu;
+            tu_ref(target, "dailing");
+            break;
+        }
+        current = current->next;
+    }
+
+    int result = -1;
+    if(target != NULL){
+        result = tu_dial(tu, target);
+        tu_unref(target, "dailing");
+    }
+
+    pthread_mutex_unlock(&pbx->mutex);
+    return result;
+}
+```
