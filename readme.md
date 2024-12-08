@@ -542,3 +542,65 @@ int pbx_dial(PBX *pbx, TU *tu, int ext) {
     return result;
 }
 ```
+
+## Task IV
+
+- **TU Struct:**
+```c
+typedef struct tu {
+    int fd;
+    TU_STATE state;
+    int extension;
+    int ref_count;
+} TU;
+```
+
+- **TU Init:** ```malloc``` new TU pointer. Set fd from function param and state = TU_ON_HOOK. We may or may not set extention initially. Shouldn't matter. Set ref_count = 0. Necessary.
+
+- **TU Ref/Uref:** Increment or decrement refcount in pointer.
+
+- **TU Pickup:**
+```c
+switch (tu->state) {
+    case TU_ON_HOOK:
+        tu->state = TU_DIAL_TONE;
+        break;
+    case TU_RINGING:
+        tu->state = TU_CONNECTED;
+        break;
+    default:
+        tu->state = TU_ERROR;
+}
+```
+
+- **TU Hangup:**
+```c
+switch (tu->state) {
+    case TU_DIAL_TONE:
+        tu->state = TU_ON_HOOK;
+        break;
+    case TU_CONNECTED:
+        tu->state = TU_ON_HOOK;
+        break;
+    default:
+        tu->state = TU_ERROR;
+}
+```
+
+- **TU Dial:**
+```c
+if (tu->state == TU_DIAL_TONE) {
+    // send call signal
+} else {
+    tu->state = TU_ERROR;
+}
+```
+
+- **TU Chat:**
+```c
+if (tu->state == TU_CONNECTED) {
+    // send message
+} else {
+    tu->state = TU_ERROR;
+}
+```
