@@ -317,6 +317,26 @@ struct pbx{
     pthread_mutex_t mutex;
 };
 
+TU_STATE tu_get_state(TU* tu){
+    int state = 0; // TOD: This will be the state in TU
+    switch(state) {
+  case 0:
+    return TU_ON_HOOK;
+  case 1:
+    return TU_RINGING;
+  case 2:
+    return TU_DIAL_TONE;
+  case 3:
+    return TU_RING_BACK;
+  case 4:
+    return TU_BUSY_SIGNAL;
+  case 5:
+    return TU_CONNECTED;
+  default:
+    return TU_ERROR;
+}
+}
+
 void printPBX(PBX *pbx) {
     pthread_mutex_lock(&pbx->mutex);
 
