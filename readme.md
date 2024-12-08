@@ -169,7 +169,7 @@ static void terminate(int status) {
       // do error stuff
   }
   ```
-  **Server.c**
+## Server.c
 ```c
 /*
  * "PBX" server module.
