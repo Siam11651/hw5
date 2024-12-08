@@ -1,0 +1,6 @@
+{
+  "files.associations": {
+    "pbx.h": "c",
+    "tu.h": "c"
+  }
+}
