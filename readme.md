@@ -304,6 +304,7 @@ typedef struct pbx PBX {
 #include "tu.h"
 #include "string.h"
 #include "sys/socket.h"
+#include "helperfunction.h"
 
 typedef struct pbx_node{
     TU *tu;
